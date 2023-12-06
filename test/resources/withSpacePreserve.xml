@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="foo" xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas">
+  <w:body xml:space="preserve">  This is body text  </w:body>
+</w:document>

@@ -1,7 +1,7 @@
 {
-  "name": "typescript-npm-package-template",
+  "name": "pretty-fast-xml",
   "version": "0.0.0-development",
-  "description": "A template for creating npm packages using TypeScript and VSCode",
+  "description": "A library for formatting and minimizing XML",
   "main": "./lib/index.js",
   "files": [
     "lib/**/*"
@@ -19,32 +19,20 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ryansonshine/typescript-npm-package-template.git"
+    "url": "git+https://github.com/VersBersh/pretty-fast-xml.git"
   },
   "license": "MIT",
   "author": {
-    "name": "Ryan Sonshine",
-    "email": "ryansonshine@users.noreply.github.com",
-    "url": "https://github.com/ryansonshine"
+    "name": "Oliver Chambers"
   },
   "engines": {
     "node": ">=12.0"
   },
   "keywords": [
-    "boilerplate",
-    "template",
-    "typescript",
-    "vscode",
-    "jest",
-    "husky",
-    "commitizen",
-    "semantic-release",
-    "codecov"
+    "xml",
+    "minimize",
+    "fast"
   ],
-  "bugs": {
-    "url": "https://github.com/ryansonshine/typescript-npm-package-template/issues"
-  },
-  "homepage": "https://github.com/ryansonshine/typescript-npm-package-template#readme",
   "devDependencies": {
     "@types/jest": "^27.5.2",
     "@types/node": "^12.20.11",
