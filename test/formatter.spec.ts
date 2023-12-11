@@ -34,7 +34,7 @@ describe('Formatter', () => {
     const data = readFileSync(path, 'utf-8');
 
     const formatted = formatXml(data);
-    const minimized = minimizeXml(data);
+    const minimized = minimizeXml(data, { removeComments: false });
     expect(minimized).toBeDefined();
     if (minimized === undefined) return;
 

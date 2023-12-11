@@ -3,15 +3,41 @@ import { StringBuilder } from './stringBuilder';
 import { OpenTagToken, SelfClosingTagToken, TokenType } from './token';
 import { Tokenizer } from './tokenizer';
 
-export const minimizeXml = (rawXml: string): string | undefined => {
-  return formatXml(rawXml, 0, '');
+export interface formatOptions {
+  indentSize?: number;
+  newlineChar?: string;
+  removeComments?: boolean;
+}
+
+interface completeFormatOptions {
+  indentSize: number;
+  newlineChar: string;
+  removeComments: boolean;
+}
+
+const minimizeXmlDefaultOptions: completeFormatOptions = {
+  newlineChar: '',
+  indentSize: 0,
+  removeComments: true,
 };
 
-export const formatXml = (
+const formatXmlDefaultOptions: completeFormatOptions = {
+  newlineChar: '\n',
+  indentSize: 2,
+  removeComments: false,
+};
+
+export const minimizeXml = (
   rawXml: string,
-  indentStep = 2,
-  newline = '\n'
-): string => {
+  options?: formatOptions
+): string | undefined => {
+  options = { ...minimizeXmlDefaultOptions, ...options };
+  return formatXml(rawXml, options);
+};
+
+export const formatXml = (rawXml: string, options?: formatOptions): string => {
+  const opt: completeFormatOptions = { ...formatXmlDefaultOptions, ...options };
+
   const sb = new StringBuilder(Math.floor(rawXml.length / 100));
   const tokenizer = new Tokenizer(rawXml);
 
@@ -29,18 +55,26 @@ export const formatXml = (
 
     switch (token.type) {
       case TokenType.Prologue:
-      case TokenType.Comment:
       case TokenType.CData:
         sb.append(' '.repeat(indentLevel));
         sb.appendView(token.view);
-        sb.append(newline);
+        sb.append(opt.newlineChar);
+        break;
+
+      case TokenType.Comment:
+        if (opt.removeComments) {
+          break;
+        }
+        sb.append(' '.repeat(indentLevel));
+        sb.appendView(token.view);
+        sb.append(opt.newlineChar);
         break;
 
       case TokenType.OpenTag:
         sb.append(' '.repeat(indentLevel));
         sb.append(formatTag(token, indentLevel));
-        indentLevel += indentStep;
-        sb.append(newline);
+        indentLevel += opt.indentSize;
+        sb.append(opt.newlineChar);
         preserveWhitespace = token.attributes.some(a =>
           a.equals('xml:space="preserve"')
         );
@@ -49,21 +83,21 @@ export const formatXml = (
       case TokenType.SelfClosingTag:
         sb.append(' '.repeat(indentLevel));
         sb.append(formatTag(token, indentLevel));
-        sb.append(newline);
+        sb.append(opt.newlineChar);
         preserveWhitespace = false;
         break;
 
       case TokenType.ClosingTag:
-        indentLevel -= indentStep;
+        indentLevel -= opt.indentSize;
         sb.append(' '.repeat(indentLevel));
         sb.appendView(token.view);
-        sb.append(newline);
+        sb.append(opt.newlineChar);
         preserveWhitespace = false;
         break;
 
       case TokenType.Text: {
         sb.pop(); // pop last new line
-        indentLevel -= indentStep; // remove the last indent step
+        indentLevel -= opt.indentSize; // remove the last indent step
         let text = token.view.toString();
         if (!preserveWhitespace) text = text.trim();
         sb.append(text);
@@ -74,7 +108,7 @@ export const formatXml = (
           return sb.toString();
         }
         sb.appendView(closeTag.value.view);
-        sb.append(newline);
+        sb.append(opt.newlineChar);
         preserveWhitespace = false;
         break;
       }
