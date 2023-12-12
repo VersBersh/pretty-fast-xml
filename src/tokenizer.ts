@@ -17,6 +17,7 @@ import {
   isValidationError,
   buildValidationError,
 } from './result';
+import { isValidXmlNameChar, isWhitespace } from './xmlCharacters';
 
 export class Tokenizer {
   private readonly _source: string;
@@ -134,7 +135,7 @@ export class Tokenizer {
   ): Result<SubToken> {
     const originalIndex = index;
 
-    while (this.isWhitespace(source[index])) {
+    while (isWhitespace(source[index])) {
       ++index;
     }
 
@@ -242,12 +243,12 @@ export class Tokenizer {
   }
 
   private readName(): StringView {
-    while (Tokenizer.isWhitespace(this._source[this._index])) {
+    while (isWhitespace(this._source[this._index])) {
       ++this._index;
     }
 
     const start = this._index;
-    while (Tokenizer.isValidXmlNameChar(this._source[this._index])) {
+    while (isValidXmlNameChar(this._source[this._index])) {
       ++this._index;
     }
 
@@ -295,30 +296,5 @@ export class Tokenizer {
 
   validationError<T>(): ErrorResult<T> {
     return new ErrorResult<T>(buildValidationError(this._source, this._index));
-  }
-
-  private static _specialsChars = ['_', '.', '-', ':'];
-
-  private static isValidXmlNameChar(char: string): boolean {
-    return (
-      this.isDigit(char) ||
-      this.isAscii(char) ||
-      this._specialsChars.includes(char)
-    );
-  }
-
-  private static isDigit(char: string): boolean {
-    const c = char.charCodeAt(0);
-    return 48 <= c && c < 58;
-  }
-
-  private static isAscii(char: string): boolean {
-    const c = char.charCodeAt(0);
-    return (65 <= c && c < 91) || (97 <= c && c < 123);
-  }
-
-  private static readonly _whitespaces = [' ', '\t', '\r', '\n'];
-  private static isWhitespace(char: string): boolean {
-    return this._whitespaces.includes(char);
   }
 }

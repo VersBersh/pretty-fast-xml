@@ -1,4 +1,4 @@
-export type Value<T> = T | ValidationError | EndOfFile;
+type Value<T> = T | ValidationError | EndOfFile;
 
 /*****************
  * End Of File
