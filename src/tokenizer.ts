@@ -1,5 +1,9 @@
 import { StringView } from './stringView';
-import { SubToken, SubTokenType, buildSubToken } from './subtoken';
+import {
+  SubToken,
+  SubTokenType as SubtokenType,
+  buildSubToken,
+} from './subtoken';
 import {
   TokenType,
   Token,
@@ -10,291 +14,380 @@ import {
 } from './token';
 import {
   Result,
-  ValueResult,
-  ErrorResult,
+  ParseValue,
+  ValidationError,
+  isValidationError,
   EndOfFile,
   isEndOfFile,
-  isValidationError,
-  buildValidationError,
+  ParseState,
 } from './result';
 import { isValidXmlNameChar, isWhitespace } from './xmlCharacters';
 
 export class Tokenizer {
-  private readonly _source: string;
-  private _index = 0;
-  private readonly _tagStack: StringView[] = [];
+  private state: ParseState;
+  private readonly nameStack: string[] = [];
 
   constructor(source: string) {
-    this._source = source;
+    this.state = new ParseState(source, 0);
   }
 
-  getRemaining(): string {
-    const res = this._source.substring(this._index);
-    this._index = this._source.length;
-    return res;
-  }
-
-  getTokens(): Result<Token[]> {
-    const tokens: Token[] = [];
-    let res = this.getNextToken();
-    while (!isEndOfFile(res.value)) {
-      if (isValidationError(res.value)) {
-        return new ErrorResult(res.value);
+  private validateTagNames(token: Token, state: ParseState): Result<Token> {
+    switch (token.type) {
+      case TokenType.OpenTag: {
+        this.nameStack.push(token.name.toString());
+        break;
       }
 
-      tokens.push(res.value);
-      res = this.getNextToken();
+      case TokenType.ClosingTag: {
+        const name = token.name;
+        const last = this.nameStack.pop();
+        if (last === undefined) {
+          return new ValidationError<Token>(
+            `unexpected closing tag: ${name.toString()}`
+          );
+        }
+        if (!name.equals(last)) {
+          return new ValidationError<Token>(
+            `unexpected tag name: ${name.toString()} (expected ${last.toString()})`
+          );
+        }
+        break;
+      }
     }
-    return new ValueResult(tokens);
+
+    return new ParseValue(token, state);
   }
 
-  getNextToken(): Result<Token> {
-    return this.getNextStartSubToken().then(token => {
-      const { type, view } = token;
+  private updateState(token: Token, state: ParseState): Result<Token> {
+    this.state = state;
+    return new ParseValue(token, state);
+  }
 
-      switch (type) {
-        case SubTokenType.Text: {
-          return new ValueResult(buildBasicToken(TokenType.Text, view));
-        }
+  private getNext(): Result<Token> {
+    return getNextToken(this.state)
+      .then(this.validateTagNames.bind(this))
+      .then(this.updateState.bind(this));
+  }
 
-        case SubTokenType.PrologueStart: {
-          return this.getNextEndSubToken(SubTokenType.PrologueEnd).then(
-            endToken =>
-              new ValueResult(
-                buildBasicToken(TokenType.Prologue, view.combine(endToken.view))
-              )
-          );
-        }
+  *[Symbol.iterator](): Iterator<ParseValue<Token> | ValidationError<Token>> {
+    while (true) {
+      const res = this.getNext();
+      if (isEndOfFile(res)) {
+        return;
+      }
 
-        case SubTokenType.CommentStart: {
-          return this.getNextEndSubToken(SubTokenType.CommentEnd).then(
-            endToken =>
-              new ValueResult(
-                buildBasicToken(TokenType.Comment, view.combine(endToken.view))
-              )
-          );
-        }
+      yield res;
+    }
+  }
+}
 
-        case SubTokenType.CDataStart: {
-          return this.getNextEndSubToken(SubTokenType.CDataEnd).then(
-            endToken =>
-              new ValueResult(
-                buildBasicToken(TokenType.CData, view.combine(endToken.view))
-              )
-          );
-        }
+const getNextToken = (state: ParseState): Result<Token> => {
+  return getNextStartSubToken(state).then(({ type, view }, state) => {
+    switch (type) {
+      case SubtokenType.Text: {
+        const token = buildBasicToken(TokenType.Text, view);
+        return new ParseValue(token, state);
+      }
 
-        case SubTokenType.OpenTagStart: {
-          const name = this.readName();
-          return this.readAttributes().then(attrs =>
-            this.getNextEndTagSubToken().then(endToken => {
-              const totalView = view.combine(endToken.view);
-              if (endToken.type === SubTokenType.SelfClosingTagEnd) {
-                return new ValueResult(
-                  buildSelfClosingTagToken(totalView, name, attrs)
-                );
+      case SubtokenType.PrologueStart: {
+        return getNextEndSubToken(state, SubtokenType.PrologueEnd).then(
+          (endSubtoken, state) => {
+            const cominedView = view.combine(endSubtoken.view);
+            const token = buildBasicToken(TokenType.Prologue, cominedView);
+            return new ParseValue(token, state);
+          }
+        );
+      }
+
+      case SubtokenType.CommentStart: {
+        return getNextEndSubToken(state, SubtokenType.CommentEnd).then(
+          (endSubtoken, state) => {
+            const cominedView = view.combine(endSubtoken.view);
+            const token = buildBasicToken(TokenType.Comment, cominedView);
+            return new ParseValue(token, state);
+          }
+        );
+      }
+
+      case SubtokenType.CDataStart: {
+        return getNextEndSubToken(state, SubtokenType.CDataEnd).then(
+          (endSubtoken, state) => {
+            const cominedView = view.combine(endSubtoken.view);
+            const token = buildBasicToken(TokenType.CData, cominedView);
+            return new ParseValue(token, state);
+          }
+        );
+      }
+
+      case SubtokenType.OpenTagStart: {
+        return readName(state).then((name, state) =>
+          readAttributes(state).then((attrs, state) =>
+            getNextEndTagSubToken(state).then((endSubtoken, state) => {
+              const totalView = view.combine(endSubtoken.view);
+              const index = totalView.getEnd();
+
+              let token: Token;
+              if (endSubtoken.type === SubtokenType.SelfClosingTagEnd) {
+                token = buildSelfClosingTagToken(totalView, name, attrs);
+              } else if (endSubtoken.type === SubtokenType.TagEnd) {
+                token = buildOpenTagToken(totalView, name, attrs);
+              } else {
+                return new ValidationError('unexpected token');
               }
 
-              this._tagStack.push(name);
-              return new ValueResult(buildOpenTagToken(totalView, name, attrs));
+              return new ParseValue(token, state.with(index));
             })
-          );
-        }
-
-        case SubTokenType.ClosingTagStart: {
-          const name = this.readName();
-          const last = this._tagStack.pop();
-          if (last === undefined || name.toString() !== last.toString()) {
-            return this.validationError();
-          }
-
-          return this.getNextEndSubToken(SubTokenType.TagEnd).then(endToken => {
-            const totalView = view.combine(endToken.view);
-            return new ValueResult(buildClosingTagToken(totalView, name));
-          });
-        }
-
-        default:
-          return this.validationError();
+          )
+        );
       }
-    });
-  }
 
-  private getNextStartSubToken(): Result<SubToken> {
-    return Tokenizer.getNextStartSubTokenCore(this._source, this._index).then(
-      token => {
-        this._index = token.view.getEnd();
-        return new ValueResult(token);
+      case SubtokenType.ClosingTagStart: {
+        return readName(state).then((name, state) =>
+          getNextEndSubToken(state, SubtokenType.TagEnd).then(
+            (endToken, state) => {
+              const totalView = view.combine(endToken.view);
+              const token = buildClosingTagToken(totalView, name);
+              return new ParseValue(token, state);
+            }
+          )
+        );
       }
-    );
-  }
 
-  private static getNextStartSubTokenCore(
-    source: string,
-    index: number
-  ): Result<SubToken> {
-    const originalIndex = index;
-
-    while (isWhitespace(source[index])) {
-      ++index;
+      default:
+        return new ValidationError('unknown token');
     }
+  });
+};
 
-    if (index == source.length) {
-      return new ErrorResult(EndOfFile);
-    }
+const getNextStartSubToken = (state: ParseState): Result<SubToken> => {
+  const originalState = state;
+
+  return skipWhitespace(state).then((_, state) => {
+    const { source, index } = state;
 
     if (source[index] != '<') {
-      const text = this.readUntilStartMarker(source, originalIndex);
-      const subtoken = buildSubToken(SubTokenType.Text, text);
-      return new ValueResult(subtoken);
+      return readTextValue(originalState).then((text, state) => {
+        const subtoken = buildSubToken(SubtokenType.Text, text);
+        return new ParseValue(subtoken, state);
+      });
+    }
+
+    if (index + 1 === source.length) {
+      return new EndOfFile();
     }
 
     switch (source[index + 1]) {
       case '?': {
         const view = new StringView(source, index, index + 2);
-        const subtoken = buildSubToken(SubTokenType.PrologueStart, view);
-        return new ValueResult(subtoken);
+        const subtoken = buildSubToken(SubtokenType.PrologueStart, view);
+        const newState = state.with(view.getEnd());
+        return new ParseValue(subtoken, newState);
       }
 
       case '/': {
         const view = new StringView(source, index, index + 2);
-        const subtoken = buildSubToken(SubTokenType.ClosingTagStart, view);
-        return new ValueResult(subtoken);
+        const subtoken = buildSubToken(SubtokenType.ClosingTagStart, view);
+        const newState = state.with(view.getEnd());
+        return new ParseValue(subtoken, newState);
       }
 
       case '!':
         if (source.startsWith('<!--', index)) {
           const view = new StringView(source, index, index + 4);
-          const subtoken = buildSubToken(SubTokenType.CommentStart, view);
-          return new ValueResult(subtoken);
+          const subtoken = buildSubToken(SubtokenType.CommentStart, view);
+          const newState = state.with(view.getEnd());
+          return new ParseValue(subtoken, newState);
         }
         if (source.startsWith('<![CDATA[', index)) {
           const view = new StringView(source, index, index + 9);
-          const subtoken = buildSubToken(SubTokenType.CDataStart, view);
-          return new ValueResult(subtoken);
+          const subtoken = buildSubToken(SubtokenType.CDataStart, view);
+          const newState = state.with(view.getEnd());
+          return new ParseValue(subtoken, newState);
         }
-        return new ErrorResult(buildValidationError(source, index));
+        return new ValidationError(
+          `unexpected character ${source[index + 1]}`,
+          index + 1
+        );
 
       default: {
         const view = new StringView(source, index, index + 1);
-        const subtoken = buildSubToken(SubTokenType.OpenTagStart, view);
-        return new ValueResult(subtoken);
+        const subtoken = buildSubToken(SubtokenType.OpenTagStart, view);
+        const newState = state.with(view.getEnd());
+        return new ParseValue(subtoken, newState);
       }
     }
+  });
+};
+
+const readTextValue = (state: ParseState): Result<StringView> => {
+  const { source, index } = state;
+  const endIndex = indexOfAny(source, index, ['<', '>']);
+
+  if (endIndex === -1) {
+    return new ValidationError('unexpected end of file');
+  }
+  if (source[endIndex] !== '<') {
+    return new ValidationError('unexpected character', endIndex);
   }
 
-  private static readUntilStartMarker(
-    source: string,
-    index: number
-  ): StringView {
-    const end = source.indexOf('<', index);
-    return end === -1
-      ? new StringView(source, index, source.length)
-      : new StringView(source, index, end);
+  const view = new StringView(source, index, endIndex);
+  return new ParseValue(view, state.with(endIndex));
+};
+
+type EndSubtoken =
+  | SubtokenType.PrologueEnd
+  | SubtokenType.CommentEnd
+  | SubtokenType.CDataEnd
+  | SubtokenType.TagEnd;
+
+const endSubTokenMap: { [key in EndSubtoken]: string } = {
+  [SubtokenType.PrologueEnd]: '?>',
+  [SubtokenType.CommentEnd]: '-->',
+  [SubtokenType.CDataEnd]: ']]>',
+  [SubtokenType.TagEnd]: '>',
+};
+
+const getNextEndSubToken = (
+  state: ParseState,
+  type: EndSubtoken
+): Result<SubToken> => {
+  const value = endSubTokenMap[type];
+  const { source, index } = state;
+
+  const endIndex = indexOfAny(source, index, ['<', '>']);
+  if (endIndex === -1) {
+    return new ValidationError(`could not complete token ${type}`);
   }
 
-  private static readonly _endSubTokens: { [key in SubTokenType]?: string } = {
-    [SubTokenType.PrologueEnd]: '?>',
-    [SubTokenType.CommentEnd]: '-->',
-    [SubTokenType.CDataEnd]: ']]>',
-    [SubTokenType.TagEnd]: '>',
-  };
-
-  private getNextEndSubToken(type: SubTokenType): Result<SubToken> {
-    return Tokenizer.getNextEndSubTokenCore(
-      this._source,
-      this._index,
-      type
-    ).then(token => {
-      this._index = token.view.getEnd();
-      return new ValueResult(token);
-    });
+  const startIndex = endIndex - value.length + 1;
+  const view = new StringView(source, startIndex, endIndex + 1);
+  if (!view.equals(value)) {
+    return new ValidationError(`could not complete token ${type}`, endIndex);
   }
 
-  private static getNextEndSubTokenCore(
-    source: string,
-    index: number,
-    type: SubTokenType
-  ): Result<SubToken> {
-    const value = this._endSubTokens[type];
-    if (value === undefined) {
-      return new ErrorResult(buildValidationError(source, index));
-    }
+  const subtoken = buildSubToken(type, view);
+  const newState = state.with(view.getEnd());
+  return new ParseValue(subtoken, newState);
+};
 
-    const end = source.indexOf(value, index);
-    if (end === undefined) {
-      return new ErrorResult(buildValidationError(source, index));
-    }
-
-    const view = new StringView(source, index, end + value.length);
-    const subtoken = buildSubToken(type, view);
-    return new ValueResult(subtoken);
-  }
-
-  private getNextEndTagSubToken(): Result<SubToken> {
-    return this.getNextEndSubToken(SubTokenType.TagEnd).then(token => {
-      const subtoken =
-        this._source[this._index - 2] == '/'
-          ? buildSubToken(SubTokenType.SelfClosingTagEnd, token.view)
-          : token;
-
-      return new ValueResult(subtoken);
-    });
-  }
-
-  private readName(): StringView {
-    while (isWhitespace(this._source[this._index])) {
-      ++this._index;
-    }
-
-    const start = this._index;
-    while (isValidXmlNameChar(this._source[this._index])) {
-      ++this._index;
-    }
-
-    return new StringView(this._source, start, this._index);
-  }
-
-  private readAttributes(): Result<StringView[]> {
-    const attributes: StringView[] = [];
-
-    let res = this.readAttribute();
-    while (!isEndOfFile(res.value)) {
-      if (isValidationError(res.value)) {
-        return new ErrorResult(res.value);
+const getNextEndTagSubToken = (state: ParseState): Result<SubToken> => {
+  return getNextEndSubToken(state, SubtokenType.TagEnd).then(
+    (subtoken, state) => {
+      const { source, index } = state;
+      if (source[index - 2] === '/') {
+        subtoken = buildSubToken(SubtokenType.SelfClosingTagEnd, subtoken.view);
       }
-      attributes.push(res.value);
-      res = this.readAttribute();
+
+      return new ParseValue(subtoken, state);
     }
-    return new ValueResult(attributes);
+  );
+};
+
+const readName = (state: ParseState): Result<StringView> =>
+  tryReadName(state).then((name, state) => {
+    if (name === null) {
+      return new ValidationError('expected a valid xml name');
+    }
+    return new ParseValue(name, state);
+  });
+
+const tryReadName = (state: ParseState): Result<StringView | null> =>
+  skipWhitespace(state).then((_, state) => {
+    const { source, index: start } = state;
+    let { index } = state;
+
+    while (index < source.length && isValidXmlNameChar(source[index])) {
+      ++index;
+    }
+
+    if (index === start) {
+      return new ParseValue(null, state);
+    }
+
+    const c = source[index];
+    if (!(isWhitespace(c) || ['>', '/', '='].includes(c))) {
+      return new ValidationError(`invalid character in name: ${c}`, index);
+    }
+
+    const view = new StringView(source, start, index);
+    return new ParseValue(view, state.with(index));
+  });
+
+const readAttributes = (state: ParseState): Result<StringView[]> => {
+  const attributes: StringView[] = [];
+  let res = tryReadAttribute(state);
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (isEndOfFile(res)) {
+      return new ValidationError('unexpected end of file');
+    }
+
+    if (isValidationError(res)) {
+      return res.As<StringView[]>();
+    }
+
+    const attr = res.value;
+
+    if (attr === null) {
+      return new ParseValue(attributes, res.state);
+    }
+
+    attributes.push(attr);
+    res = tryReadAttribute(res.state);
+  }
+};
+
+const tryReadAttribute = (state: ParseState): Result<StringView | null> =>
+  tryReadName(state).then((name, { source, index }) => {
+    if (name === null) {
+      return new ParseValue(null, state);
+    }
+
+    if (index + 3 >= source.length) {
+      return new ValidationError('unexpected end of file');
+    }
+
+    if (source[index] !== '=') {
+      return new ValidationError('expected an equal sign', index);
+    }
+    ++index;
+
+    if (source[index] !== '"') {
+      return new ValidationError('expected quotation mark', index);
+    }
+    ++index;
+
+    const end = indexOfAny(source, index, ['"', '<', '>']);
+    if (end === -1 || source[end] != '"') {
+      return new ValidationError('expected closing quotation mark', index);
+    }
+
+    const view = new StringView(source, name.getStart(), end + 1);
+    return new ParseValue(view, state.with(end + 1));
+  });
+
+const skipWhitespace = ({ source, index }: ParseState): Result<void> => {
+  while (index < source.length && isWhitespace(source[index])) {
+    ++index;
   }
 
-  private readAttribute(): Result<StringView> {
-    const name = this.readName();
+  return index === source.length
+    ? new EndOfFile()
+    : new ParseValue(undefined, new ParseState(source, index));
+};
 
-    if (name.isEmpty()) {
-      return new ErrorResult(EndOfFile);
+const indexOfAny = (
+  source: string,
+  startIndex: number,
+  chars: string[]
+): number => {
+  let index = startIndex;
+  while (index < source.length) {
+    if (chars.includes(source[index])) {
+      return index;
     }
-
-    if (this._source[this._index++] !== '=') {
-      return this.validationError();
-    }
-
-    if (this._source[this._index++] !== '"') {
-      return this.validationError();
-    }
-
-    const end = this._source.indexOf('"', this._index);
-    if (end === -1) {
-      return this.validationError();
-    }
-
-    this._index = end + 1;
-    const view = new StringView(this._source, name.getStart(), this._index);
-    return new ValueResult(view);
+    ++index;
   }
-
-  validationError<T>(): ErrorResult<T> {
-    return new ErrorResult<T>(buildValidationError(this._source, this._index));
-  }
-}
+  return -1;
+};

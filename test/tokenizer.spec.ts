@@ -1,6 +1,5 @@
 import { readFileSync } from 'fs';
 import { Tokenizer } from '../src/tokenizer';
-import { Token } from '../src/token';
 
 describe('StringView', () => {
   it.each([
@@ -14,7 +13,7 @@ describe('StringView', () => {
     const data = readFileSync(path, 'utf-8');
 
     const tokenizer = new Tokenizer(data);
-    const tokens = tokenizer.getTokens().value as Token[];
+    const tokens = [...tokenizer];
     expect(tokens).toBeDefined();
     expect(tokens).toHaveLength(count);
 
@@ -27,7 +26,7 @@ describe('StringView', () => {
 
     const startTime = Date.now();
     const tokenizer = new Tokenizer(data);
-    const tokens = tokenizer.getTokens().value as Token[];
+    const tokens = [...tokenizer];
     const endTime = Date.now();
     const executionTime = endTime - startTime;
 

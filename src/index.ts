@@ -1,1 +1,1 @@
-export { formatXml, minimizeXml, formatOptions } from './formatter';
+export { formatXml, minifyXml, FormatOptions } from './formatter';

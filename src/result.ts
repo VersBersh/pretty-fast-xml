@@ -1,79 +1,97 @@
-type Value<T> = T | ValidationError | EndOfFile;
+export class ParseState {
+  source: string;
+  index: number;
+
+  constructor(source: string, index: number) {
+    this.source = source;
+    this.index = index;
+  }
+
+  with(index: number): ParseState {
+    return new ParseState(this.source, index);
+  }
+
+  end(): ParseState {
+    return new ParseState(this.source, this.source.length);
+  }
+}
+
+export type Result<T> = ParseValue<T> | ValidationError<T> | EndOfFile<T>;
+
+interface ResultMonad<T> {
+  then: (func: (val: T, state: ParseState) => Result<T>) => Result<T>;
+}
 
 /*****************
  * End Of File
  *****************/
-export const EndOfFile = Symbol('EndOfFile');
-export type EndOfFile = typeof EndOfFile;
 
-export function isEndOfFile<T>(test: Value<T>): test is EndOfFile {
-  return test === EndOfFile;
+const EndOfFileSymbol = Symbol('EndOfFile');
+
+export class EndOfFile<T> implements ResultMonad<T> {
+  public value = EndOfFileSymbol;
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  then<U>(_: (val: T, state: ParseState) => Result<U>): EndOfFile<U> {
+    return new EndOfFile<U>();
+  }
+}
+
+export function isEndOfFile<T>(test: Result<T>): test is EndOfFile<T> {
+  return test.value === EndOfFileSymbol;
 }
 
 /******************
  * ValidationError
  ******************/
-export interface ValidationError {
-  source: string;
-  index: number;
-}
 
-export function isValidationError<T>(test: Value<T>): test is ValidationError {
-  return (
-    typeof test === 'object' &&
-    test !== null &&
-    'source' in test &&
-    'index' in test
-  );
-}
+export class ValidationError<T> implements ResultMonad<T> {
+  public description: string;
+  public value: number;
 
-export const buildValidationError = (
-  source: string,
-  index: number
-): ValidationError => ({
-  source: source,
-  index: index,
-});
-
-/******************
- * Result<T>
- ******************/
-
-interface IResult<T> {
-  then<U>(func: (val: T) => Result<U>): Result<U>;
-}
-
-export class ErrorResult<T> implements IResult<T> {
-  public value: ValidationError | EndOfFile;
-
-  constructor(value: ValidationError | EndOfFile) {
-    this.value = value;
+  constructor(description: string, index = -1) {
+    this.description = description;
+    this.value = index;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  then<U>(_: (val: T) => Result<U>): Result<U> {
-    return new ErrorResult<U>(this.value);
+  then<U>(_: (val: T, state: ParseState) => Result<U>): ValidationError<U> {
+    return new ValidationError<U>(this.description, this.value);
   }
 
-  As<U>(): Result<U> {
-    return new ErrorResult<U>(this.value);
+  As<U>(): ValidationError<U> {
+    return new ValidationError<U>(this.description, this.value);
   }
 }
 
-export class ValueResult<T> implements IResult<T> {
+export function isValidationError<T>(
+  test: Result<T>
+): test is ValidationError<T> {
+  return typeof test === 'object' && test !== null && 'description' in test;
+}
+
+/******************
+ * ParseValue<T>
+ ******************/
+
+export class ParseValue<T> implements ResultMonad<T> {
   public value: T;
+  public state: ParseState;
 
-  constructor(value: T) {
+  constructor(value: T, state: ParseState) {
     this.value = value;
+    this.state = state;
   }
 
-  then<U>(func: (val: T) => Result<U>): Result<U> {
-    const res = func(this.value);
-    if (isEndOfFile(res.value) || isValidationError(res.value)) {
-      return new ErrorResult(res.value);
-    }
-    return new ValueResult<U>(res.value);
+  public static From<U>(value: U, state: ParseState): ParseValue<U> {
+    return new ParseValue(value, state);
+  }
+
+  then<U>(func: (val: T, state: ParseState) => Result<U>): Result<U> {
+    return func(this.value, this.state);
   }
 }
 
-export type Result<T> = ValueResult<T> | ErrorResult<T>;
+export function isParseValue<T>(test: Result<T>): test is ParseValue<T> {
+  return typeof test === 'object' && test !== null && 'state' in test;
+}

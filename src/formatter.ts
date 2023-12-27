@@ -1,54 +1,65 @@
-import { isEndOfFile, isValidationError } from './result';
-import { StringBuilder } from './stringBuilder';
-import { OpenTagToken, SelfClosingTagToken, TokenType } from './token';
+import { ValidationError, isValidationError } from './result';
+import { IndentationFormatter } from './indentationFormatter';
+import { OpenTagToken, SelfClosingTagToken, Token, TokenType } from './token';
 import { Tokenizer } from './tokenizer';
 
-export interface formatOptions {
+export interface FormatResult {
+  succeeded: boolean;
+  formatted: string;
+  validationErrorDescription?: string;
+  validationErrorIndex?: number;
+}
+
+export interface FormatOptions {
   indentSize?: number;
+  lineWrapWidth?: number;
   newlineChar?: string;
   removeComments?: boolean;
 }
 
-interface completeFormatOptions {
+export interface CompleteFormatOptions {
   indentSize: number;
+  lineWrapWidth: number;
   newlineChar: string;
   removeComments: boolean;
 }
 
-const minimizeXmlDefaultOptions: completeFormatOptions = {
+const minifyXmlDefaultOptions: CompleteFormatOptions = {
   newlineChar: '',
+  lineWrapWidth: Infinity,
   indentSize: 0,
   removeComments: true,
 };
 
-const formatXmlDefaultOptions: completeFormatOptions = {
+const formatXmlDefaultOptions: CompleteFormatOptions = {
   newlineChar: '\n',
+  lineWrapWidth: 150,
   indentSize: 2,
   removeComments: false,
 };
 
-export const minimizeXml = (
+export const minifyXml = (
   rawXml: string,
-  options?: formatOptions
-): string | undefined => {
-  options = { ...minimizeXmlDefaultOptions, ...options };
+  options?: FormatOptions
+): FormatResult => {
+  options = { ...minifyXmlDefaultOptions, ...options };
   return formatXml(rawXml, options);
 };
 
-export const formatXml = (rawXml: string, options?: formatOptions): string => {
-  const opt: completeFormatOptions = { ...formatXmlDefaultOptions, ...options };
-
-  const sb = new StringBuilder(Math.floor(rawXml.length / 100));
+export const formatXml = (
+  rawXml: string,
+  options?: FormatOptions
+): FormatResult => {
+  const opt: CompleteFormatOptions = { ...formatXmlDefaultOptions, ...options };
+  const fmt = new IndentationFormatter(opt);
   const tokenizer = new Tokenizer(rawXml);
 
-  let indentLevel = 0;
+  let prevToken: Token | null = null;
   let preserveWhitespace = false;
-  let result = tokenizer.getNextToken();
 
-  while (!isEndOfFile(result.value)) {
-    if (isValidationError(result.value)) {
-      sb.append(tokenizer.getRemaining());
-      return sb.toString();
+  for (const result of tokenizer) {
+    if (isValidationError(result)) {
+      return handleValidationError(result, rawXml, fmt, prevToken);
     }
 
     const token = result.value;
@@ -56,89 +67,90 @@ export const formatXml = (rawXml: string, options?: formatOptions): string => {
     switch (token.type) {
       case TokenType.Prologue:
       case TokenType.CData:
-        sb.append(' '.repeat(indentLevel));
-        sb.appendView(token.view);
-        sb.append(opt.newlineChar);
+        fmt.appendNewLine(token.view.toString());
         break;
 
       case TokenType.Comment:
         if (opt.removeComments) {
           break;
         }
-        sb.append(' '.repeat(indentLevel));
-        sb.appendView(token.view);
-        sb.append(opt.newlineChar);
+        fmt.appendNewLine(token.view.toString());
         break;
 
       case TokenType.OpenTag:
-        sb.append(' '.repeat(indentLevel));
-        sb.append(formatTag(token, indentLevel));
-        indentLevel += opt.indentSize;
-        sb.append(opt.newlineChar);
+        formatTag(token, fmt);
+        fmt.increment();
         preserveWhitespace = token.attributes.some(a =>
           a.equals('xml:space="preserve"')
         );
         break;
 
       case TokenType.SelfClosingTag:
-        sb.append(' '.repeat(indentLevel));
-        sb.append(formatTag(token, indentLevel));
-        sb.append(opt.newlineChar);
+        formatTag(token, fmt);
         preserveWhitespace = false;
         break;
 
       case TokenType.ClosingTag:
-        indentLevel -= opt.indentSize;
-        sb.append(' '.repeat(indentLevel));
-        sb.appendView(token.view);
-        sb.append(opt.newlineChar);
+        fmt.decrement();
+        if (prevToken?.type === TokenType.Text) {
+          fmt.appendPreviousLine(token.view.toString());
+        } else {
+          fmt.appendNewLine(token.view.toString());
+        }
         preserveWhitespace = false;
         break;
 
       case TokenType.Text: {
-        sb.pop(); // pop last new line
-        indentLevel -= opt.indentSize; // remove the last indent step
         let text = token.view.toString();
-        if (!preserveWhitespace) text = text.trim();
-        sb.append(text);
-
-        const closeTag = tokenizer.getNextToken();
-        if (isEndOfFile(closeTag.value) || isValidationError(closeTag.value)) {
-          sb.append(tokenizer.getRemaining());
-          return sb.toString();
+        if (!preserveWhitespace) {
+          text = text.trim();
         }
-        sb.appendView(closeTag.value.view);
-        sb.append(opt.newlineChar);
-        preserveWhitespace = false;
+        fmt.appendPreviousLine(text);
         break;
       }
     }
 
-    result = tokenizer.getNextToken();
+    prevToken = token;
   }
 
-  sb.pop(); // the final newline
-  return sb.toString();
+  return {
+    succeeded: true,
+    formatted: fmt.toString(),
+  };
 };
 
 const formatTag = (
   tag: OpenTagToken | SelfClosingTagToken,
-  indentLevel: number
-): string => {
+  fmt: IndentationFormatter
+): void => {
   const name = tag.name.toString();
   const attrs = tag.attributes.map(a => a.toString());
   const close = tag.type == TokenType.OpenTag ? '>' : '/>';
 
   if (attrs.length === 0) {
-    return `<${name}${close}`;
+    fmt.appendNewLine(`<${name}${close}`);
+    return;
   }
 
-  const indentOffset = 2 + name.length; // length of: '<' + name + ' '
-  const attrLen =
-    indentOffset + attrs.reduce((acc, val) => acc + val.length, 0);
-  const joinString =
-    attrLen < 150 ? ' ' : '\n' + ' '.repeat(indentLevel + indentOffset);
-  const formattedAttrs = attrs.join(joinString);
+  fmt.appendNewLine(`<${name} `);
+  fmt.alignAttributes(attrs);
+  fmt.appendPreviousLine(close);
+};
 
-  return `<${name} ${formattedAttrs}${close}`;
+const handleValidationError = (
+  error: ValidationError<Token>,
+  source: string,
+  fmt: IndentationFormatter,
+  prevToken: Token | null
+): FormatResult => {
+  const currentLen = fmt.length();
+  const lastGoodIndex = prevToken?.view.getEnd() ?? 0;
+  const remaining = source.substring(lastGoodIndex);
+  fmt.appendPreviousLine(remaining);
+  return {
+    succeeded: false,
+    formatted: fmt.toString(),
+    validationErrorDescription: error.description,
+    validationErrorIndex: currentLen + Math.max(0, error.value - lastGoodIndex),
+  };
 };

@@ -2,5 +2,8 @@
   "editor.formatOnSave": true,
   "[typescript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "jestrunner.debugOptions": {
+    "runtimeExecutable": "C:/Users/oliver.chambers/.pyenv/pyenv-win/versions/pretty-fast-xml/Scripts/node.exe",
   }
 }
