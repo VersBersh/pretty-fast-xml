@@ -56,9 +56,9 @@ describe('InvalidData', () => {
     );
 
     const minimizedResult = minifyXml(input, { removeComments: false });
-    console.log(minimizedResult);
-    const m = minimizedResult;
-    console.log(m.formatted.substring(m.validationErrorIndex!));
+    //console.log(minimizedResult);
+    //const m = minimizedResult;
+    //console.log(m.formatted.substring(m.validationErrorIndex!));
     expect(minimizedResult.formatted).toEqual(expectation);
   });
 });

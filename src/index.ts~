@@ -1,5 +1,0 @@
-export {
-  formatXml,
-  minifyXml as minimizeXml,
-  FormatOptions,
-} from './formatter';
