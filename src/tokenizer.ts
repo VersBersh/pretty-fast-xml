@@ -135,7 +135,12 @@ const getNextToken = (state: ParseState): Result<Token> => {
                 return new ValidationError('unexpected token');
               }
 
-              return new ParseValue(token, state.with(index));
+              const preserveWhitespace =
+                endSubtoken.type !== SubtokenType.SelfClosingTagEnd &&
+                attrs.some(a => a.equals('xml:space="preserve"'));
+
+              const newState = state.with(index, preserveWhitespace);
+              return new ParseValue(token, newState);
             })
           )
         );
@@ -147,6 +152,9 @@ const getNextToken = (state: ParseState): Result<Token> => {
             (endToken, state) => {
               const totalView = view.combine(endToken.view);
               const token = buildClosingTagToken(totalView, name);
+              if (state.preserveWhitespace) {
+                state = state.with(state.index, false);
+              }
               return new ParseValue(token, state);
             }
           )
@@ -367,14 +375,19 @@ const tryReadAttribute = (state: ParseState): Result<StringView | null> =>
     return new ParseValue(view, state.with(end + 1));
   });
 
-const skipWhitespace = ({ source, index }: ParseState): Result<void> => {
-  while (index < source.length && isWhitespace(source[index])) {
-    ++index;
+const skipWhitespace = (state: ParseState): Result<void> => {
+  const { source, preserveWhitespace } = state;
+  let index = state.index;
+
+  if (!preserveWhitespace) {
+    while (index < source.length && isWhitespace(source[index])) {
+      ++index;
+    }
   }
 
   return index === source.length
     ? new EndOfFile()
-    : new ParseValue(undefined, new ParseState(source, index));
+    : new ParseValue(undefined, state.with(index));
 };
 
 const indexOfAny = (

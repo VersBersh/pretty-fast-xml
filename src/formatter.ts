@@ -92,7 +92,7 @@ export const formatXml = (
 
       case TokenType.ClosingTag:
         fmt.decrement();
-        if (prevToken?.type === TokenType.Text) {
+        if (prevToken?.type === TokenType.Text || preserveWhitespace) {
           fmt.appendPreviousLine(token.view.toString());
         } else {
           fmt.appendNewLine(token.view.toString());

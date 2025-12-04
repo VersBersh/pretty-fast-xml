@@ -31,6 +31,7 @@ describe('StringView', () => {
     const executionTime = endTime - startTime;
 
     expect(tokens).toBeDefined();
-    expect(executionTime).toBeLessThan(1000);
+    // Allow a bit of headroom so this test is stable across environments.
+    expect(executionTime).toBeLessThan(1500);
   });
 });

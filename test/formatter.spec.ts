@@ -62,3 +62,27 @@ describe('InvalidData', () => {
     expect(minimizedResult.formatted).toEqual(expectation);
   });
 });
+
+describe('respects single space in w:t', () => {
+  const data = readFileSync(
+    './test/resources/withSpaceOnlySpacePreserve.xml',
+    'utf-8'
+  );
+  const formattedResult = formatXml(data);
+  expect(formattedResult.formatted).toContain('<w:t xml:space="preserve">');
+  expect(formattedResult.formatted).not.toContain(
+    '<w:t xml:space="preserve">\n'
+  );
+});
+
+describe('respects empty w:t with space preserve', () => {
+  const data = readFileSync(
+    './test/resources/withEmptySpacePreserve.xml',
+    'utf-8'
+  );
+  const formattedResult = formatXml(data);
+  expect(formattedResult.formatted).toContain(
+    '<w:t xml:space="preserve"></w:t>'
+  );
+  expect(formattedResult.formatted).toContain('<w:t>space</w:t>');
+});

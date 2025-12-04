@@ -1,18 +1,31 @@
 export class ParseState {
   source: string;
   index: number;
+  preserveWhitespace: boolean;
 
-  constructor(source: string, index: number) {
+  constructor(source: string, index: number, preserveWhitespace = false) {
     this.source = source;
     this.index = index;
+    this.preserveWhitespace = preserveWhitespace;
   }
 
-  with(index: number): ParseState {
-    return new ParseState(this.source, index);
+  with(
+    index: number,
+    preserveWhitespace: boolean | undefined = undefined
+  ): ParseState {
+    return new ParseState(
+      this.source,
+      index,
+      preserveWhitespace ?? this.preserveWhitespace
+    );
   }
 
   end(): ParseState {
-    return new ParseState(this.source, this.source.length);
+    return new ParseState(
+      this.source,
+      this.source.length,
+      this.preserveWhitespace
+    );
   }
 }
 
